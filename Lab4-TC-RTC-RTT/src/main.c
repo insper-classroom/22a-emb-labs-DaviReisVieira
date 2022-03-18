@@ -316,7 +316,6 @@ int main(void)
 	uint32_t current_hour, current_min, current_sec;
 	uint32_t current_year, current_month, current_day, current_week;
 
-	uint32_t next_sec;
 	/* Insert application code here, after the board has been initialized. */
 	while (1)
 	{
@@ -332,18 +331,20 @@ int main(void)
 		if (but1_flag)
 		{
 			uint32_t next_min, next_sec;
-			if (current_sec >= 40)
+
+			next_sec = current_sec + 20;
+
+			if (next_sec >= 60)
 			{
-				next_min = (current_sec + 20) / 60;
-				next_sec = (current_sec + 20) % 60;
-				rtc_set_time_alarm(RTC, 1, current_hour, 1, current_min + next_min, 1, next_sec);
+				next_min = current_min + 1;
+				next_sec = next_sec - 60;
 			}
 			else
 			{
 				next_min = current_min;
-				next_sec = current_sec + 20;
-				rtc_set_time_alarm(RTC, 1, current_hour, 1, next_min, 1, next_sec);
 			}
+
+			rtc_set_time_alarm(RTC, 1, current_hour, 1, next_min, 1, next_sec);
 
 			but1_flag = 0;
 		}
