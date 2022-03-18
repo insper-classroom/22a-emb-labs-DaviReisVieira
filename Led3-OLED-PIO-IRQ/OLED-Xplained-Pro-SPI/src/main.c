@@ -108,7 +108,7 @@ int change_frequency(int freq){
 			freq += 100;
 			oled_update(freq);
 			
-			return freq ;
+			return freq;
 		}
 	}
 
