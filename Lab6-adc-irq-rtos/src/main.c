@@ -16,7 +16,7 @@
 /* RTOS                                                                */
 /************************************************************************/
 
-#define TASK_ADC_STACK_SIZE (1024*10 / sizeof(portSTACK_TYPE))
+#define TASK_ADC_STACK_SIZE (1024 * 10 / sizeof(portSTACK_TYPE))
 #define TASK_ADC_STACK_PRIORITY (tskIDLE_PRIORITY)
 
 extern void vApplicationStackOverflowHook(xTaskHandle *pxTask,
@@ -31,9 +31,10 @@ extern void xPortSysTickHandler(void);
 /************************************************************************/
 
 /** Queue for msg log send data */
-QueueHandle_t xQueueADC;
+QueueHandle_t xQueueADC, xQueuePROC;
 
-typedef struct {
+typedef struct
+{
   uint value;
 } adcData;
 
@@ -51,12 +52,14 @@ static void configure_console(void);
 /************************************************************************/
 
 extern void vApplicationStackOverflowHook(xTaskHandle *pxTask,
-                                          signed char *pcTaskName) {
+                                          signed char *pcTaskName)
+{
   printf("stack overflow %x %s\r\n", pxTask, (portCHAR *)pcTaskName);
   /* If the parameters have been corrupted then inspect pxCurrentTCB to
    * identify which task has overflowed its stack.
    */
-  for (;;) {
+  for (;;)
+  {
   }
 }
 
@@ -64,7 +67,8 @@ extern void vApplicationIdleHook(void) { pmc_sleep(SAM_PM_SMODE_SLEEP_WFI); }
 
 extern void vApplicationTickHook(void) {}
 
-extern void vApplicationMallocFailedHook(void) {
+extern void vApplicationMallocFailedHook(void)
+{
   /* Called if a call to pvPortMalloc() fails because there is insufficient
   free memory available in the FreeRTOS heap.  pvPortMalloc() is called
   internally by FreeRTOS API functions that create tasks, queues, software
@@ -79,7 +83,8 @@ extern void vApplicationMallocFailedHook(void) {
 /* handlers / callbacks                                                 */
 /************************************************************************/
 
-void TC1_Handler(void) {
+void TC1_Handler(void)
+{
   volatile uint32_t ul_dummy;
 
   ul_dummy = tc_get_status(TC0, 1);
@@ -92,31 +97,58 @@ void TC1_Handler(void) {
   afec_start_software_conversion(AFEC_POT);
 }
 
-static void AFEC_pot_Callback(void) {
+static void AFEC_pot_Callback(void)
+{
   adcData adc;
   adc.value = afec_channel_get_value(AFEC_POT, AFEC_POT_CHANNEL);
   BaseType_t xHigherPriorityTaskWoken = pdTRUE;
-  xQueueSendFromISR(xQueueADC, &adc, &xHigherPriorityTaskWoken);
+  xQueueSendFromISR(xQueuePROC, &adc, &xHigherPriorityTaskWoken);
 }
 
 /************************************************************************/
 /* TASKS                                                                */
 /************************************************************************/
 
-static void task_adc(void *pvParameters) {
-
-  // configura ADC e TC para controlar a leitura
+static void task_proc(void *pvParameters)
+{
   config_AFEC_pot(AFEC_POT, AFEC_POT_ID, AFEC_POT_CHANNEL, AFEC_pot_Callback);
   TC_init(TC0, ID_TC1, 1, 10);
   tc_start(TC0, 1);
 
-  // variável para recever dados da fila
   adcData adc;
+  int mean;
+  int sum = 0;
 
-  while (1) {
-    if (xQueueReceive(xQueueADC, &(adc), 1000)) {
-      printf("ADC: %d \n", adc);
-    } else {
+  while (1)
+  {
+
+    for (int i = 0; i < 10; i++)
+    {
+      if (xQueueReceive(xQueuePROC, &(adc), 1000))
+      {
+        sum += adc.value;
+      }
+    }
+
+    mean = sum / 10;
+    sum = 0;
+    xQueueSend(xQueueADC, (void *)&mean, 10);
+  }
+}
+
+static void task_adc(void *pvParameters)
+{
+  // variável para recever dados da fila
+  int mean;
+
+  while (1)
+  {
+    if (xQueueReceive(xQueueADC, &(mean), 1000))
+    {
+      printf("ADC: %d \n", mean);
+    }
+    else
+    {
       printf("Nao chegou um novo dado em 1 segundo");
     }
   }
@@ -129,7 +161,8 @@ static void task_adc(void *pvParameters) {
 /**
  * \brief Configure the console UART.
  */
-static void configure_console(void) {
+static void configure_console(void)
+{
   const usart_serial_options_t uart_serial_options = {
       .baudrate = CONF_UART_BAUDRATE,
       .charlength = CONF_UART_CHAR_LENGTH,
@@ -145,7 +178,8 @@ static void configure_console(void) {
 }
 
 static void config_AFEC_pot(Afec *afec, uint32_t afec_id, uint32_t afec_channel,
-                            afec_callback_t callback) {
+                            afec_callback_t callback)
+{
   /*************************************
    * Ativa e configura AFEC
    *************************************/
@@ -189,7 +223,8 @@ static void config_AFEC_pot(Afec *afec, uint32_t afec_id, uint32_t afec_channel,
   NVIC_EnableIRQ(afec_id);
 }
 
-void TC_init(Tc *TC, int ID_TC, int TC_CHANNEL, int freq) {
+void TC_init(Tc *TC, int ID_TC, int TC_CHANNEL, int freq)
+{
   uint32_t ul_div;
   uint32_t ul_tcclks;
   uint32_t ul_sysclk = sysclk_get_cpu_hz();
@@ -214,23 +249,35 @@ void TC_init(Tc *TC, int ID_TC, int TC_CHANNEL, int freq) {
  *
  *  \return Unused (ANSI-C compatibility).
  */
-int main(void) {
+int main(void)
+{
   sysclk_init();
   board_init();
   configure_console();
 
-  xQueueADC = xQueueCreate(100, sizeof(adcData));
+  xQueueADC = xQueueCreate(100, sizeof(int));
   if (xQueueADC == NULL)
-    printf("falha em criar a queue xQueueADC \n");
+    printf("falha ao criar a queue xQueueADC \n");
+  xQueuePROC = xQueueCreate(100, sizeof(adcData));
+  if (xQueueADC == NULL)
+    printf("falha ao criar a queue xQueueADC \n");
 
   if (xTaskCreate(task_adc, "ADC", TASK_ADC_STACK_SIZE, NULL,
-                  TASK_ADC_STACK_PRIORITY, NULL) != pdPASS) {
+                  TASK_ADC_STACK_PRIORITY, NULL) != pdPASS)
+  {
     printf("Failed to create test ADC task\r\n");
+  }
+  if (xTaskCreate(task_proc, "PROC", TASK_ADC_STACK_SIZE, NULL,
+                  TASK_ADC_STACK_PRIORITY, NULL) != pdPASS)
+  {
+    printf("Failed to create test PROC task\r\n");
   }
 
   vTaskStartScheduler();
 
-  while (1) {  }
+  while (1)
+  {
+  }
 
   /* Will only get here if there was insufficient memory to create the idle
    * task. */
